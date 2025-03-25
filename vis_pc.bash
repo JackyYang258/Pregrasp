@@ -1,0 +1,1 @@
+python -m mani_skill.examples.demo_vis_pcd -e "StackCube-v1"
