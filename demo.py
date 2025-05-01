@@ -15,6 +15,7 @@ from typing import List, Optional, Annotated, Union
 
 import trimesh
 import trimesh.scene
+from inference import calculate_graspability_from_point_cloud, initialize_graspnet_model
 @dataclass
 class Args:
     env_id: Annotated[str, tyro.conf.arg(aliases=["-e"])] = "PushCube-v1"
@@ -133,50 +134,55 @@ def main(args: Args):
             # elif isinstance(obj, Link):
             #     print(f"{obj_id}: Link, name - {obj.name}")
         if args.obs_mode == "pointcloud":
-            xyz = obs["pointcloud"]["xyzw"][0, ..., :3]  # 点云坐标 (N, 3)
-            colors = obs["pointcloud"]["rgb"][0]  # 点云颜色 (N, 3)
-            segmentation = obs["pointcloud"]["segmentation"][0]  # 分割标签 (N,)
-            cam2world = obs["sensor_param"]["base_camera"]["cam2world_gl"][0]  # 相机到世界的变换矩阵 (4, 4)
+            # xyz = obs["pointcloud"]["xyzw"][0, ..., :3]  # 点云坐标 (N, 3)
+            # colors = obs["pointcloud"]["rgb"][0]  # 点云颜色 (N, 3)
+            # segmentation = obs["pointcloud"]["segmentation"][0]  # 分割标签 (N,)
+            # cam2world = obs["sensor_param"]["base_camera"]["cam2world_gl"][0]  # 相机到世界的变换矩阵 (4, 4)
 
-            # 定义范围过滤的边界
-            x_min, x_max = -0.3, 0.5
-            y_min, y_max = -0.5, 0.5
-            z_min, z_max = -1, 0.2
+            # # 定义范围过滤的边界
+            # x_min, x_max = -0.3, 0.5
+            # y_min, y_max = -0.5, 0.5
+            # z_min, z_max = -1, 0.2
 
-            # 创建范围掩码
-            range_mask = (xyz[:, 0] >= x_min) & (xyz[:, 0] <= x_max) & \
-                        (xyz[:, 1] >= y_min) & (xyz[:, 1] <= y_max) & \
-                        (xyz[:, 2] >= z_min) & (xyz[:, 2] <= z_max)
+            # # 创建范围掩码
+            # range_mask = (xyz[:, 0] >= x_min) & (xyz[:, 0] <= x_max) & \
+            #             (xyz[:, 1] >= y_min) & (xyz[:, 1] <= y_max) & \
+            #             (xyz[:, 2] >= z_min) & (xyz[:, 2] <= z_max)
 
-            # 应用范围掩码过滤点云
-            xyz_filtered = xyz[range_mask]
-            colors_filtered = colors[range_mask]
+            # # 应用范围掩码过滤点云
+            # xyz_filtered = xyz[range_mask]
+            # colors_filtered = colors[range_mask]
 
-            # 将 cam2world 转换为 Tensor
-            cam2world_tensor = torch.tensor(cam2world, device=xyz.device, dtype=xyz.dtype)
+            # # 将 cam2world 转换为 Tensor
+            # cam2world_tensor = torch.tensor(cam2world, device=xyz.device, dtype=xyz.dtype)
 
-            # 将点云转换为齐次坐标 (N, 4)
-            xyz_homogeneous = torch.cat([xyz_filtered, torch.ones(xyz_filtered.shape[0], 1, device=xyz.device) ], dim=1)
+            # # 将点云转换为齐次坐标 (N, 4)
+            # xyz_homogeneous = torch.cat([xyz_filtered, torch.ones(xyz_filtered.shape[0], 1, device=xyz.device) ], dim=1)
 
-            # 计算相机坐标系下的点云坐标
-            world2cam = torch.inverse(cam2world_tensor)
-            xyz_camera = torch.matmul(world2cam, xyz_homogeneous.t()).t()[:, :3]
+            # # 计算相机坐标系下的点云坐标
+            # world2cam = torch.inverse(cam2world_tensor)
+            # xyz_camera = torch.matmul(world2cam, xyz_homogeneous.t()).t()[:, :3]
 
-            # 缩放点云坐标
-            xyz_camera = xyz_camera
+            # # 缩放点云坐标
+            # xyz_camera = xyz_camera
+            point_cloud = env.get_pointcloud()
 
             # 将结果保存为 NumPy 数组
-            xyz_camera_np = xyz_camera.cpu().numpy()
+            xyz_camera_np = point_cloud
             np.save('pointcloud/point_cloud_vertical.npy', xyz_camera_np)
-
+            
+            initialize_graspnet_model()
+            graspability = calculate_graspability_from_point_cloud(point_clouds=[xyz_camera_np])
+            print(graspability)
+            
             # 使用 trimesh 可视化点云
-            pcd = trimesh.points.PointCloud(xyz_camera_np, colors_filtered.cpu().numpy())
-            for uid, config in env.unwrapped._sensor_configs.items():
-                if isinstance(config, CameraConfig):
-                    cam2world = np.eye(4)
-                    camera = trimesh.scene.Camera(uid, (1024, 1024), fov=(np.rad2deg(config.fov), np.rad2deg(config.fov)))
-                    break
-            trimesh.Scene([pcd], camera=camera, camera_transform=cam2world).show()
+            # pcd = trimesh.points.PointCloud(xyz_camera_np)
+            # for uid, config in env.unwrapped._sensor_configs.items():
+            #     if isinstance(config, CameraConfig):
+            #         cam2world = np.eye(4)
+            #         camera = trimesh.scene.Camera(uid, (1024, 1024), fov=(np.rad2deg(config.fov), np.rad2deg(config.fov)))
+            #         break
+            # trimesh.Scene([pcd], camera=camera, camera_transform=cam2world).show()
         # if args.obs_mode == "pointcloud":
         #     xyz = obs["pointcloud"]["xyzw"][0, ..., :3]
         #     colors = obs["pointcloud"]["rgb"][0]

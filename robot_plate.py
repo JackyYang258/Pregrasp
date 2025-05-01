@@ -54,8 +54,12 @@ class RobotPlateEnv(BaseEnv):
 
     @property
     def _default_sensor_configs(self):
-        pose = sapien_utils.look_at(eye=[0.3, 0, 0.6], target=[-0.1, 0, 0.1])
-        return [CameraConfig("base_camera", pose, 128, 128, np.pi / 2, 0.01, 100)]
+        pose_base = sapien_utils.look_at(eye=[0.3, 0, 0.6], target=[-0.1, 0, 0.1])
+        pose_right = sapien_utils.look_at(eye=[0, 0.5, 0.3], target=[0, 0, 0.2])
+        pose_left = sapien_utils.look_at(eye=[0, -0.5, 0.3], target=[0, 0, 0.2])
+        return [CameraConfig("base_camera", pose_base, 128, 128, np.pi / 2, 0.01, 100),
+                CameraConfig("right_camera", pose_right, 128, 128, np.pi / 2, 0.01, 100),
+                CameraConfig("left_camera", pose_left, 128, 128, np.pi / 2, 0.01, 100)]
 
     @property
     def _default_human_render_camera_configs(self):
@@ -75,6 +79,14 @@ class RobotPlateEnv(BaseEnv):
             name="plate",
             initial_pose=sapien.Pose(p=[0, 0, 0.02]),
         )
+        # self.obj = actors.build_cube(
+        #     self.scene,
+        #     half_size=self.cube_half_size,
+        #     color=np.array([12, 42, 160, 255]) / 255,
+        #     name="cube",
+        #     body_type="dynamic",
+        #     initial_pose=sapien.Pose(p=[0, 0, self.cube_half_size]),
+        # )
 
     def _initialize_episode(self, env_idx: torch.Tensor, options: dict):
         with torch.device(self.device):
@@ -85,7 +97,7 @@ class RobotPlateEnv(BaseEnv):
             plate_xyz = torch.zeros((b, 3))
             plate_xyz[:, 0] = 0.2
             plate_xyz[:, 2] = 0.004
-            theta = torch.tensor(math.radians(0))  
+            theta = torch.tensor(math.radians(60))  
         
             qx = torch.tensor(0)
             qy = torch.sin(theta / 2)
@@ -97,6 +109,15 @@ class RobotPlateEnv(BaseEnv):
             plate_quat[:, 2] = qz
             plate_quat[:, 3] = qw
             self.plate.set_pose(Pose.create_from_pq(p=plate_xyz, q=plate_quat))
+            
+            # xyz = torch.zeros((b, 3))
+            # # xyz[..., :2] = torch.rand((b, 2)) * 0.2 - 0.1
+            # xyz[..., 0] = 0.3
+            # xyz[..., 1] = 0.15
+            # xyz[..., 2] = self.cube_half_size
+            # q = [1, 0, 0, 0]
+            # obj_pose = Pose.create_from_pq(p=xyz, q=q)
+            # self.obj.set_pose(obj_pose)
 
     def _get_obs_extra(self, info: Dict):
         # in reality some people hack is_grasped into observations by checking if the gripper can close fully or not
@@ -137,67 +158,71 @@ class RobotPlateEnv(BaseEnv):
         # 用于存储所有批次的处理结果
         xyz_camera_list = []
 
-        # 找到所有批次中过滤后的最小点云数量
-        min_points = float('inf')
 
-        # 遍历每个批次，找到最小点云数量
-        for i in range(batch_size):
-            # 提取当前批次的数据
-            xyz = obs["pointcloud"]["xyzw"][i, ..., :3]
-            colors = obs["pointcloud"]["rgb"][i]
-            segmentation = obs["pointcloud"]["segmentation"][i]
-            cam2world = obs["sensor_param"]["base_camera"]["cam2world_gl"][i]
-
-            # 创建范围掩码
-            range_mask = (xyz[:, 0] >= x_min) & (xyz[:, 0] <= x_max) & \
-                        (xyz[:, 1] >= y_min) & (xyz[:, 1] <= y_max) & \
-                        (xyz[:, 2] >= z_min) & (xyz[:, 2] <= z_max)
-
-            # 应用范围掩码过滤点云
-            xyz_filtered = xyz[range_mask]
-            colors_filtered = colors[range_mask]
-
-            # 更新最小点云数量
-            min_points = min(min_points, xyz_filtered.shape[0])
 
         # 再次遍历每个批次，裁剪到最小点云数量
         for i in range(batch_size):
             # 提取当前批次的数据
             xyz = obs["pointcloud"]["xyzw"][i, ..., :3]
             colors = obs["pointcloud"]["rgb"][i]
-            segmentation = obs["pointcloud"]["segmentation"][i]
-            cam2world = obs["sensor_param"]["base_camera"]["cam2world_gl"][i]
+            # segmentation = obs["pointcloud"]["segmentation"][i]
+            cam2world = obs["sensor_param"]["base_camera"]["cam2world_gl"][i].to(xyz.device)
 
             # 创建范围掩码
+            x_min, x_max = -0.1, 0.5
+            y_min, y_max = -0.3, 0.3
+            z_min, z_max = -1, 0.2
             range_mask = (xyz[:, 0] >= x_min) & (xyz[:, 0] <= x_max) & \
                         (xyz[:, 1] >= y_min) & (xyz[:, 1] <= y_max) & \
                         (xyz[:, 2] >= z_min) & (xyz[:, 2] <= z_max)
-
+            # # 计算与目标点的距离
+            # target_point = torch.tensor([0.2, 0.0, 0.004], device=xyz.device)
+            # distance_threshold = 0.1
+            # # 计算点云中每个点到目标点的距离
+            # distance_mask = torch.norm(xyz - target_point, dim=1) < distance_threshold
+            mask = range_mask
             # 应用范围掩码过滤点云
-            xyz_filtered = xyz[range_mask]
-            colors_filtered = colors[range_mask]
+            xyz = xyz[mask]
+            colors_filtered = colors[mask]
 
-            # 随机选择 min_points 个点
-            if xyz_filtered.shape[0] > min_points:
-                indices = torch.randperm(xyz_filtered.shape[0])[:min_points]
-                xyz_filtered = xyz_filtered[indices]
-                colors_filtered = colors_filtered[indices]
+            num_point = 5000
+            num_valid = len(xyz)
+            # if num_valid >= num_point:
+            #     idxs = torch.randperm(num_valid)[:num_point]
+            # else:
+            #     idxs1 = torch.arange(num_valid, device=xyz.device)
+            #     idxs2 = torch.randint(0, num_valid, (num_point - num_valid,), device=xyz.device)
+            #     idxs = torch.cat([idxs1, idxs2])
+            # xyz_filtered = xyz_filtered[idxs]
+            
+            
+            # num_point = 1024
+            
+            # if np.sum(distance_mask) >= num_point:
+            #     idxs = np.random.choice(np.sum(distance_mask), num_point, replace=False)
+            # else:
+            #     idxs1 = np.arange(np.sum(distance_mask))
+            #     idxs2 = np.random.choice(np.sum(distance_mask), num_point - np.sum(distance_mask), replace=True)
+            #     idxs = np.concatenate([idxs1, idxs2], axis=0)
+            # #todo: test number of points
+            # xyz_filtered = xyz_filtered[idxs]
 
             # 将点云转换为齐次坐标 (N, 4)
-            xyz_homogeneous = torch.cat([xyz_filtered, torch.ones(xyz_filtered.shape[0], 1, device=xyz.device)], dim=1)
+            xyz_homogeneous = torch.cat([xyz, torch.ones_like(xyz[:, :1])], dim=1)
 
             # 计算相机坐标系下的点云坐标
             world2cam = torch.inverse(cam2world)
             xyz_camera = torch.matmul(world2cam, xyz_homogeneous.t()).t()[:, :3]
 
-            # 缩放点云坐标
-            xyz_camera = xyz_camera / 2
-            
+            #todo: test point cloud(visualize)
+            xyz_camera = xyz_camera
             xyz_camera[:, 2] = -xyz_camera[:, 2]
-            xyz_camera_np = xyz_camera.cpu().numpy()
-            # 将当前批次的处理结果添加到列表中
-            xyz_camera_list.append(xyz_camera_np)
+            
+            xyz_camera_list.append(xyz_camera.cpu().numpy())
 
+        if batch_size == 1:
+            # 如果只有一个批次，直接返回该批次的点云
+            return xyz_camera_list[0]
         return xyz_camera_list
     
     def get_obs(self, info: Optional[Dict] = None):
@@ -244,11 +269,12 @@ class RobotPlateEnv(BaseEnv):
         #     graspability = calculate_graspability_from_point_cloud(point_cloud)
         #     print(graspability)
         
-        # inference = True
-        # if inference:
-        #     point_cloud = self.get_pointcloud()
-        #     graspability = calculate_graspability_from_point_cloud(point_cloud)
-        #     self.graspability = torch.tensor(graspability, device=self.device)
+        inference = True
+        if inference:
+            point_cloud = self.get_pointcloud()
+            # graspability = calculate_graspability_from_point_cloud(point_cloud)
+            # self.graspability = torch.tensor(graspability, device=self.device)
+            # print("graspability",graspability)
         
         initial_position = torch.tensor([0.2, 0.0, 0.004], device=self.device)
         initial_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
