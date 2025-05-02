@@ -17,7 +17,7 @@ import MinkowskiEngine as ME
 import collections.abc as container_abcs
 
 _GRASPNET_MODEL = None
-_DEVICE = None
+_DEVICE = "cuda:0"
 
 def initialize_graspnet_model(device="cuda:0"):
     """初始化模型并缓存"""
@@ -36,7 +36,8 @@ def initialize_graspnet_model(device="cuda:0"):
         net.eval()
         
         _GRASPNET_MODEL = net
-    print
+
+    torch.cuda.set_device(_DEVICE)
 
 def calculate_graspability_from_point_cloud(
     point_clouds,
@@ -46,6 +47,10 @@ def calculate_graspability_from_point_cloud(
     visualize=False
 ):
     global _GRASPNET_MODEL, _DEVICE
+    if _GRASPNET_MODEL is None:
+        initialize_graspnet_model()
+    
+    torch.cuda.synchronize()
 
     # 数据预处理
     ret_dicts = []
@@ -98,6 +103,7 @@ def calculate_graspability_from_point_cloud(
     graspabilities = []
     for i in range(len(point_clouds)):
         preds = grasp_preds[i].detach().cpu().numpy()
+        print("preds", preds.shape)
         # Filtering grasp poses for real-world execution. 
         # The first mask preserves the grasp poses that are within a 30-degree angle with the vertical pose and have a width of less than 9cm.
         mask = (preds[:,10] > 0.9) & (preds[:,1] < 0.09)
@@ -116,7 +122,7 @@ def calculate_graspability_from_point_cloud(
             gg = gg[:30]
 
         # 计算 graspability
-        gg = gg[gg.scores >= 0.1]
+        gg = gg[gg.scores >= 0.08]
         graspability = np.sum(gg.scores)
         graspabilities.append(graspability)
         
@@ -139,6 +145,12 @@ def calculate_graspability_from_point_cloud(
         #     cloud.points = o3d.utility.Vector3dVector(point_clouds[i].astype(np.float32))
         #     o3d.visualization.draw_geometries([cloud, *grippers])
     
+    del end_points
+    del grasp_preds
+    del batch_data
+    torch.cuda.empty_cache()
+    
+
     return graspabilities
 
 

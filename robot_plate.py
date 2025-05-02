@@ -156,9 +156,9 @@ class RobotPlateEnv(BaseEnv):
         batch_size = obs["pointcloud"]["xyzw"].shape[0]
 
         # 定义范围过滤的边界
-        x_min, x_max = -0.06, 0.45
-        y_min, y_max = -0.25, 0.25
-        z_min, z_max = 0.005, 0.2
+        x_min, x_max = -0.05, 0.45
+        y_min, y_max = -0.20, 0.20
+        z_min, z_max = 0.005, 0.20
 
         # 用于存储所有批次的处理结果
         xyz_camera_list = []
