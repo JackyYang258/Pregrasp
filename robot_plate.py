@@ -54,12 +54,17 @@ class RobotPlateEnv(BaseEnv):
 
     @property
     def _default_sensor_configs(self):
-        pose_base = sapien_utils.look_at(eye=[0.3, 0, 0.6], target=[-0.1, 0, 0.1])
-        pose_right = sapien_utils.look_at(eye=[0, 0.5, 0.3], target=[0, 0, 0.2])
-        pose_left = sapien_utils.look_at(eye=[0, -0.5, 0.3], target=[0, 0, 0.2])
-        return [CameraConfig("base_camera", pose_base, 128, 128, np.pi / 2, 0.01, 100),
-                CameraConfig("right_camera", pose_right, 128, 128, np.pi / 2, 0.01, 100),
-                CameraConfig("left_camera", pose_left, 128, 128, np.pi / 2, 0.01, 100)]
+
+        pose_base = sapien_utils.look_at(eye=[0.2, 0.3, 0.3], target=[0.2, 0, 0.1])
+        pose_left = sapien_utils.look_at(eye=[0.2, -0.5, 0.5], target=[0.2, 0, 0.0])
+        # pose_base = sapien_utils.look_at(eye=[0.3, 0, 0.6], target=[-0.1, 0, 0.1])
+        # pose_right = sapien_utils.look_at(eye=[0.2, 0.5, 0.3], target=[0, 0, 0.2])
+        # pose_left = sapien_utils.look_at(eye=[0.2, -0.5, 0.3], target=[0, 0, 0.2])
+        return [
+                CameraConfig("base_camera", pose_base, 128, 128, np.pi / 2, 0.01, 100),
+                # CameraConfig("right_camera", pose_right, 128, 128, np.pi / 2, 0.01, 100),
+                CameraConfig("left_camera", pose_left, 128, 128, np.pi / 2, 0.01, 100)
+                ]
 
     @property
     def _default_human_render_camera_configs(self):
@@ -100,7 +105,7 @@ class RobotPlateEnv(BaseEnv):
             theta = torch.tensor(math.radians(60))  
         
             qx = torch.tensor(0)
-            qy = torch.sin(theta / 2)
+            qy = -torch.sin(theta / 2)
             qz = torch.tensor(0)
             qw = torch.cos(theta / 2)
             plate_quat = torch.zeros((b, 4))
@@ -151,15 +156,13 @@ class RobotPlateEnv(BaseEnv):
         batch_size = obs["pointcloud"]["xyzw"].shape[0]
 
         # 定义范围过滤的边界
-        x_min, x_max = -0.3, 0.5
-        y_min, y_max = -0.5, 0.5
-        z_min, z_max = -1, 0.2
+        x_min, x_max = -0.06, 0.45
+        y_min, y_max = -0.25, 0.25
+        z_min, z_max = 0.005, 0.2
 
         # 用于存储所有批次的处理结果
         xyz_camera_list = []
-
-
-
+        
         # 再次遍历每个批次，裁剪到最小点云数量
         for i in range(batch_size):
             # 提取当前批次的数据
@@ -168,44 +171,47 @@ class RobotPlateEnv(BaseEnv):
             # segmentation = obs["pointcloud"]["segmentation"][i]
             cam2world = obs["sensor_param"]["base_camera"]["cam2world_gl"][i].to(xyz.device)
 
-            # 创建范围掩码
-            x_min, x_max = -0.1, 0.5
-            y_min, y_max = -0.3, 0.3
-            z_min, z_max = -1, 0.2
-            range_mask = (xyz[:, 0] >= x_min) & (xyz[:, 0] <= x_max) & \
-                        (xyz[:, 1] >= y_min) & (xyz[:, 1] <= y_max) & \
-                        (xyz[:, 2] >= z_min) & (xyz[:, 2] <= z_max)
             # # 计算与目标点的距离
             # target_point = torch.tensor([0.2, 0.0, 0.004], device=xyz.device)
             # distance_threshold = 0.1
             # # 计算点云中每个点到目标点的距离
             # distance_mask = torch.norm(xyz - target_point, dim=1) < distance_threshold
-            mask = range_mask
+            range_mask = (xyz[:, 0] >= x_min) & (xyz[:, 0] <= x_max) & \
+                        (xyz[:, 1] >= y_min) & (xyz[:, 1] <= y_max) & \
+                        (xyz[:, 2] >= z_min) & (xyz[:, 2] <= z_max)
+            
             # 应用范围掩码过滤点云
-            xyz = xyz[mask]
-            colors_filtered = colors[mask]
-
-            num_point = 5000
+            xyz = xyz[range_mask]
+            colors_filtered = colors[range_mask]
+            
+            # adjust number of points
+            num_point = 1800
             num_valid = len(xyz)
-            # if num_valid >= num_point:
-            #     idxs = torch.randperm(num_valid)[:num_point]
-            # else:
-            #     idxs1 = torch.arange(num_valid, device=xyz.device)
-            #     idxs2 = torch.randint(0, num_valid, (num_point - num_valid,), device=xyz.device)
-            #     idxs = torch.cat([idxs1, idxs2])
-            # xyz_filtered = xyz_filtered[idxs]
+            if num_valid >= num_point:
+                idxs = torch.randperm(num_valid)[:num_point]
+            else:
+                idxs1 = torch.arange(num_valid, device=xyz.device)
+                idxs2 = torch.randint(0, num_valid, (num_point - num_valid,), device=xyz.device)
+                idxs = torch.cat([idxs1, idxs2])
+            xyz = xyz[idxs]
             
+            # create a table
+            table_z = 0.0  
+            table_density = 0.01  
+            x_size = x_max - x_min
+            y_size = y_max - y_min
+            x_points = int(x_size / table_density) + 1
+            y_points = int(y_size / table_density) + 1
+            total_table_points = x_points * y_points
+            x_coords = torch.linspace(x_min, x_max, x_points, device=xyz.device)
+            y_coords = torch.linspace(y_min, y_max, y_points, device=xyz.device)
+            x_grid, y_grid = torch.meshgrid(x_coords, y_coords, indexing='ij')
+            table_x = x_grid.reshape(-1)
+            table_y = y_grid.reshape(-1)
+            table_z = torch.full((total_table_points,), table_z, device=xyz.device)
+            table_xyz = torch.stack([table_x, table_y, table_z], dim=1)
             
-            # num_point = 1024
-            
-            # if np.sum(distance_mask) >= num_point:
-            #     idxs = np.random.choice(np.sum(distance_mask), num_point, replace=False)
-            # else:
-            #     idxs1 = np.arange(np.sum(distance_mask))
-            #     idxs2 = np.random.choice(np.sum(distance_mask), num_point - np.sum(distance_mask), replace=True)
-            #     idxs = np.concatenate([idxs1, idxs2], axis=0)
-            # #todo: test number of points
-            # xyz_filtered = xyz_filtered[idxs]
+            xyz = torch.cat([xyz, table_xyz], dim=0)
 
             # 将点云转换为齐次坐标 (N, 4)
             xyz_homogeneous = torch.cat([xyz, torch.ones_like(xyz[:, :1])], dim=1)
@@ -214,8 +220,6 @@ class RobotPlateEnv(BaseEnv):
             world2cam = torch.inverse(cam2world)
             xyz_camera = torch.matmul(world2cam, xyz_homogeneous.t()).t()[:, :3]
 
-            #todo: test point cloud(visualize)
-            xyz_camera = xyz_camera
             xyz_camera[:, 2] = -xyz_camera[:, 2]
             
             xyz_camera_list.append(xyz_camera.cpu().numpy())

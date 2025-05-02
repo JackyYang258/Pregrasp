@@ -23,10 +23,7 @@ def initialize_graspnet_model(device="cuda:0"):
     """初始化模型并缓存"""
     global _GRASPNET_MODEL, _DEVICE
     checkpoint_path = '/home/ysq/project/graspness_unofficial/logs/minkresunet_epoch10-1.tar'
-    if torch.cuda.is_available() and "cuda" in device:
-        _DEVICE = torch.device(device)
-    else:
-        _DEVICE = torch.device("cpu")
+    _DEVICE = torch.device(device if torch.cuda.is_available() and "cuda" in device else "cpu")
     
     if _GRASPNET_MODEL is None:
         # 初始化模型
@@ -129,7 +126,11 @@ def calculate_graspability_from_point_cloud(
             grippers = gg.to_open3d_geometry_list()
             cloud = o3d.geometry.PointCloud()
             cloud.points = o3d.utility.Vector3dVector(pc.astype(np.float32))
-            o3d.visualization.draw_geometries([cloud, *grippers])
+            coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(
+                size=0.1,  # 坐标轴长度
+                origin=[0, 0, 0]  # 坐标原点
+            )
+            o3d.visualization.draw_geometries([cloud, *grippers,coordinate_frame])
         
         # visualization for debugging
         # if i == 1:
