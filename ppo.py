@@ -274,7 +274,7 @@ if __name__ == "__main__":
         print(f"Epoch: {iteration}, global_step={global_step}")
         final_values = torch.zeros((args.num_steps, args.num_envs), device=device)
         agent.eval()
-        if iteration % args.eval_freq == 1 and iteration > 1:
+        if iteration % args.eval_freq == 1:
             print("Evaluating")
             eval_obs, _ = eval_envs.reset()
             eval_metrics = defaultdict(list)
@@ -330,7 +330,7 @@ if __name__ == "__main__":
                 logger.add_scalar(f"train/position_penalty", final_info["position_penalty"][done_mask].float().mean(), global_step)
                 logger.add_scalar(f"train/xy_position_reward", final_info["xy_position_reward"][done_mask].float().mean(), global_step)
                 logger.add_scalar(f"train/static_reward", final_info["static_reward"][done_mask].float().mean(), global_step)
-                # logger.add_scalar(f"train/graspability", final_info["graspability"][done_mask].float().mean(), global_step)
+                logger.add_scalar(f"train/graspability", final_info["graspability"][done_mask].float().mean(), global_step)
                 for k, v in final_info["episode"].items():
                     logger.add_scalar(f"train/{k}", v[done_mask].float().mean(), global_step)
                 with torch.no_grad():

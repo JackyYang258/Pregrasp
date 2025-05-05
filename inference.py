@@ -103,7 +103,6 @@ def calculate_graspability_from_point_cloud(
     graspabilities = []
     for i in range(len(point_clouds)):
         preds = grasp_preds[i].detach().cpu().numpy()
-        print("preds", preds.shape)
         # Filtering grasp poses for real-world execution. 
         # The first mask preserves the grasp poses that are within a 30-degree angle with the vertical pose and have a width of less than 9cm.
         mask = (preds[:,10] > 0.9) & (preds[:,1] < 0.09)
@@ -126,7 +125,7 @@ def calculate_graspability_from_point_cloud(
         graspability = np.sum(gg.scores)
         graspabilities.append(graspability)
         
-        vis = True
+        vis = False
         if vis:
             pc = ret_dicts[0]['point_clouds']
             grippers = gg.to_open3d_geometry_list()

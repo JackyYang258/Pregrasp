@@ -45,8 +45,8 @@ class RobotPlateEnv(BaseEnv):
     def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
         self.robot_init_qpos_noise = robot_init_qpos_noise
         self.angle_reward = torch.tensor(0.0)
-        self.position_penalty = torch.tensor(0.0)
-        self.xy_position_reward = torch.tensor(0.0)
+        self.plate_position_penalty = torch.tensor(0.0)
+        self.ee_position_penalty = torch.tensor(0.0)
         self.static_reward = torch.tensor(0.0)
         self.graspability = torch.tensor(0.0)
         initialize_graspnet_model()
@@ -185,15 +185,18 @@ class RobotPlateEnv(BaseEnv):
             colors_filtered = colors[range_mask]
             
             # adjust number of points
-            num_point = 1800
+            num_point = 1500
             num_valid = len(xyz)
-            if num_valid >= num_point:
+            if num_valid == 0:
+                pass
+            elif num_valid >= num_point:
                 idxs = torch.randperm(num_valid)[:num_point]
+                xyz = xyz[idxs]
             else:
                 idxs1 = torch.arange(num_valid, device=xyz.device)
                 idxs2 = torch.randint(0, num_valid, (num_point - num_valid,), device=xyz.device)
                 idxs = torch.cat([idxs1, idxs2])
-            xyz = xyz[idxs]
+                xyz = xyz[idxs]
             
             # create a table
             table_z = 0.0  
@@ -211,6 +214,8 @@ class RobotPlateEnv(BaseEnv):
             table_z = torch.full((total_table_points,), table_z, device=xyz.device)
             table_xyz = torch.stack([table_x, table_y, table_z], dim=1)
             
+            if num_valid == 0:
+                xyz = table_xyz
             xyz = torch.cat([xyz, table_xyz], dim=0)
 
             # 将点云转换为齐次坐标 (N, 4)
@@ -248,8 +253,8 @@ class RobotPlateEnv(BaseEnv):
         return {
             "success": success.bool(),
             "angle_reward": self.angle_reward,
-            "position_penalty": self.position_penalty,
-            "xy_position_reward": self.xy_position_reward,
+            "plate_position_penalty": self.plate_position_penalty,
+            "ee_position_penalty": self.ee_position_penalty,
             "static_reward": self.static_reward,
             "graspability": self.graspability,
         }
@@ -273,12 +278,11 @@ class RobotPlateEnv(BaseEnv):
         #     graspability = calculate_graspability_from_point_cloud(point_cloud)
         #     print(graspability)
         
-        inference = True
+        inference = False
         if inference:
             point_cloud = self.get_pointcloud()
-            # graspability = calculate_graspability_from_point_cloud(point_cloud)
-            # self.graspability = torch.tensor(graspability, device=self.device)
-            # print("graspability",graspability)
+            graspability = calculate_graspability_from_point_cloud(point_cloud)
+            self.graspability = torch.tensor(graspability, device=self.device)
         
         initial_position = torch.tensor([0.2, 0.0, 0.004], device=self.device)
         initial_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
@@ -308,13 +312,13 @@ class RobotPlateEnv(BaseEnv):
         xy_initial = initial_position[..., :2]
         xy_current = current_position[..., :2]
         xy_diff_squared = torch.sum((xy_current - xy_initial) ** 2, dim=1)
-        self.position_penalty = -xy_diff_squared
+        self.plate_position_penalty = -xy_diff_squared
 
-        
-        end_effector_position = self.agent.tcp.pose.p  
+        contact_position = torch.tensor([0.2, 0.0, 0.004], device=self.device)
+        end_effector_position = self.agent.tcp.pose.p 
         xy_end_effector = end_effector_position[..., :3] 
         xy_diff_squared = torch.sum((xy_end_effector - initial_position[..., :3]) ** 2, dim=1)  
-        self.xy_position_reward = -xy_diff_squared 
+        self.ee_position_penalty = -xy_diff_squared 
 
         self.is_plate_tilted = angle_diff > 0.05
         qvel_without_gripper = self.agent.robot.get_qvel()
@@ -323,9 +327,12 @@ class RobotPlateEnv(BaseEnv):
             5 * torch.linalg.norm(qvel_without_gripper, axis=1)
         )
 
-        reward = self.angle_reward + 0.2 * self.position_penalty
-        reward += 0.1 * self.xy_position_reward  # 将xy位置奖励加到总
+        reward = 0.2 * self.plate_position_penalty
+        reward += 0.1 * self.ee_position_penalty  
         reward += self.static_reward * self.is_plate_tilted
+        
+        reward += self.angle_reward
+        # reward += self.graspability 
 
         return reward
 

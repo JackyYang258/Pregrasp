@@ -170,7 +170,6 @@ def main(args: Args):
             # 将结果保存为 NumPy 数组
             xyz_camera_np = point_cloud
             np.save('pointcloud/point_cloud_vertical1.npy', xyz_camera_np)
-            print("saved")
             initialize_graspnet_model()
             graspability = calculate_graspability_from_point_cloud(point_clouds=[xyz_camera_np])
             print(graspability)
