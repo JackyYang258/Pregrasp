@@ -327,10 +327,10 @@ if __name__ == "__main__":
                 final_info = infos["final_info"]
                 done_mask = infos["_final_info"]
                 logger.add_scalar(f"train/angle_reward", final_info["angle_reward"][done_mask].float().mean(), global_step)
-                logger.add_scalar(f"train/position_penalty", final_info["position_penalty"][done_mask].float().mean(), global_step)
-                logger.add_scalar(f"train/xy_position_reward", final_info["xy_position_reward"][done_mask].float().mean(), global_step)
+                logger.add_scalar(f"train/plate_position_penalty", final_info["plate_position_penalty"][done_mask].float().mean(), global_step)
+                logger.add_scalar(f"train/ee_position_penalty", final_info["ee_position_penalty"][done_mask].float().mean(), global_step)
                 logger.add_scalar(f"train/static_reward", final_info["static_reward"][done_mask].float().mean(), global_step)
-                logger.add_scalar(f"train/graspability", final_info["graspability"][done_mask].float().mean(), global_step)
+                # logger.add_scalar(f"train/graspability", final_info["graspability"][done_mask].float().mean(), global_step)
                 for k, v in final_info["episode"].items():
                     logger.add_scalar(f"train/{k}", v[done_mask].float().mean(), global_step)
                 with torch.no_grad():
