@@ -43,6 +43,7 @@ class RobotPlateEnv(BaseEnv):
     goal_thresh = 0.025
 
     def __init__(self, *args, robot_uids="panda", robot_init_qpos_noise=0.02, **kwargs):
+        
         self.robot_init_qpos_noise = robot_init_qpos_noise
         self.angle_reward = torch.tensor(0.0)
         self.plate_position_penalty = torch.tensor(0.0)
@@ -50,8 +51,30 @@ class RobotPlateEnv(BaseEnv):
         self.static_reward = torch.tensor(0.0)
         self.graspability = torch.tensor(0.0)
         self.plate_static_reward = torch.tensor(0.0)
-        initialize_graspnet_model()
         super().__init__(*args, robot_uids=robot_uids, **kwargs)
+        self.initial_position = torch.tensor([0.2, 0.0, 0.004], device=self.device)
+        self.initial_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
+        self.contact_position = torch.tensor([0.07, 0.0, 0.0], device=self.device)
+        initialize_graspnet_model()
+        
+        # create a table
+        self.x_min, self.x_max = -0.05, 0.45
+        self.y_min, self.y_max = -0.20, 0.20
+        self.z_min, self.z_max = 0.005, 0.20
+        table_z = 0.0  
+        table_density = 0.01  
+        x_size = self.x_max - self.x_min
+        y_size = self.y_max - self.y_min
+        x_points = int(x_size / table_density) + 1
+        y_points = int(y_size / table_density) + 1
+        total_table_points = x_points * y_points
+        x_coords = torch.linspace(self.x_min, self.x_max, x_points, device=self.device)
+        y_coords = torch.linspace(self.y_min, self.y_max, y_points, device=self.device)
+        x_grid, y_grid = torch.meshgrid(x_coords, y_coords, indexing='ij')
+        table_x = x_grid.reshape(-1)
+        table_y = y_grid.reshape(-1)
+        table_z = torch.full((total_table_points,), table_z, device=self.device)
+        self.table_xyz = torch.stack([table_x, table_y, table_z], dim=1)
 
     @property
     def _default_sensor_configs(self):
@@ -156,10 +179,7 @@ class RobotPlateEnv(BaseEnv):
         # 获取批次大小
         batch_size = obs["pointcloud"]["xyzw"].shape[0]
 
-        # 定义范围过滤的边界
-        x_min, x_max = -0.05, 0.45
-        y_min, y_max = -0.20, 0.20
-        z_min, z_max = 0.005, 0.20
+        
 
         # 用于存储所有批次的处理结果
         xyz_camera_list = []
@@ -177,13 +197,12 @@ class RobotPlateEnv(BaseEnv):
             # distance_threshold = 0.1
             # # 计算点云中每个点到目标点的距离
             # distance_mask = torch.norm(xyz - target_point, dim=1) < distance_threshold
-            range_mask = (xyz[:, 0] >= x_min) & (xyz[:, 0] <= x_max) & \
-                        (xyz[:, 1] >= y_min) & (xyz[:, 1] <= y_max) & \
-                        (xyz[:, 2] >= z_min) & (xyz[:, 2] <= z_max)
+            range_mask = (xyz[:, 0] >= self.x_min) & (xyz[:, 0] <= self.x_max) & \
+                        (xyz[:, 1] >= self.y_min) & (xyz[:, 1] <= self.y_max) & \
+                        (xyz[:, 2] >= self.z_min) & (xyz[:, 2] <= self.z_max)
             
             # 应用范围掩码过滤点云
             xyz = xyz[range_mask]
-            colors_filtered = colors[range_mask]
             
             # adjust number of points
             num_point = 1500
@@ -199,25 +218,11 @@ class RobotPlateEnv(BaseEnv):
                 idxs = torch.cat([idxs1, idxs2])
                 xyz = xyz[idxs]
             
-            # create a table
-            table_z = 0.0  
-            table_density = 0.01  
-            x_size = x_max - x_min
-            y_size = y_max - y_min
-            x_points = int(x_size / table_density) + 1
-            y_points = int(y_size / table_density) + 1
-            total_table_points = x_points * y_points
-            x_coords = torch.linspace(x_min, x_max, x_points, device=xyz.device)
-            y_coords = torch.linspace(y_min, y_max, y_points, device=xyz.device)
-            x_grid, y_grid = torch.meshgrid(x_coords, y_coords, indexing='ij')
-            table_x = x_grid.reshape(-1)
-            table_y = y_grid.reshape(-1)
-            table_z = torch.full((total_table_points,), table_z, device=xyz.device)
-            table_xyz = torch.stack([table_x, table_y, table_z], dim=1)
+            
             
             if num_valid == 0:
-                xyz = table_xyz
-            xyz = torch.cat([xyz, table_xyz], dim=0)
+                xyz = self.table_xyz
+            xyz = torch.cat([xyz, self.table_xyz], dim=0)
 
             # 将点云转换为齐次坐标 (N, 4)
             xyz_homogeneous = torch.cat([xyz, torch.ones_like(xyz[:, :1])], dim=1)
@@ -233,7 +238,7 @@ class RobotPlateEnv(BaseEnv):
         if batch_size == 1:
             # 如果只有一个批次，直接返回该批次的点云
             return xyz_camera_list[0]
-        return xyz_camera_list
+        return np.array(xyz_camera_list)
     
     def get_obs(self, info: Optional[Dict] = None):
 
@@ -297,6 +302,12 @@ class RobotPlateEnv(BaseEnv):
         #     "is_robot_static": is_robot_static,
         #     "is_grasped": is_grasped,
         # }
+        
+    def get_pitch(self, q):
+            x, y, z, w = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
+            sin_p = 2 * (w * y - z * x)
+            sin_p = torch.clamp(sin_p, -1.0, 1.0)
+            return torch.asin(sin_p)
 
     def compute_dense_reward(self, obs: Any, action: torch.Tensor, info: Dict):
         # inference = False
@@ -304,21 +315,12 @@ class RobotPlateEnv(BaseEnv):
         #     point_cloud = self.get_pointcloud()
         #     graspability = calculate_graspability_from_point_cloud(point_cloud)
         #     print(graspability)
-        
-        initial_position = torch.tensor([0.2, 0.0, 0.004], device=self.device)
-        initial_quat = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
 
         current_position = self.plate.pose.p
         current_quat = self.plate.pose.q
 
-        def get_pitch(q):
-            x, y, z, w = q[..., 0], q[..., 1], q[..., 2], q[..., 3]
-            sin_p = 2 * (w * y - z * x)
-            sin_p = torch.clamp(sin_p, -1.0, 1.0)
-            return torch.asin(sin_p)
-
-        initial_pitch = get_pitch(initial_quat)
-        current_pitch = get_pitch(current_quat)
+        initial_pitch = self.get_pitch(self.initial_quat)
+        current_pitch = self.get_pitch(current_quat)
 
         # 计算角度差异并设置上限（例如90度）
         angle_diff = torch.abs(current_pitch - initial_pitch)
@@ -327,14 +329,13 @@ class RobotPlateEnv(BaseEnv):
 
         self.angle_reward = angle_diff
 
-        xy_initial = initial_position[..., :2]
+        xy_initial = self.initial_position[..., :2]
         xy_current = current_position[..., :2]
         xy_diff_squared = torch.sum((xy_current - xy_initial) ** 2, dim=1)
         self.plate_position_penalty = -xy_diff_squared
 
-        contact_position = torch.tensor([0.07, 0.0, 0.0], device=self.device)
         xy_end_effector = self.agent.tcp.pose.p[..., :3]
-        xy_diff_squared = torch.sum((xy_end_effector - contact_position[..., :3]) ** 2, dim=1)  
+        xy_diff_squared = torch.sum((xy_end_effector - self.contact_position[..., :3]) ** 2, dim=1)  
         self.ee_position_penalty = -xy_diff_squared 
         is_plate_inplace = (xy_diff_squared < 0.05) & (angle_diff < 0.5)
 
@@ -345,24 +346,47 @@ class RobotPlateEnv(BaseEnv):
             5 * torch.linalg.norm(qvel_without_gripper, axis=1)
         )
         
+        self.is_plate_good = self.is_plate_tilted & is_plate_inplace
+        
         v = torch.linalg.norm(self.plate.linear_velocity, axis=1)
         av = torch.linalg.norm(self.plate.angular_velocity, axis=1)
         self.plate_static_reward = 1 - torch.tanh(v * 10 + av)
 
+
         inference = False
         if inference:
-            point_cloud = self.get_pointcloud()
-            point_cloud = point_cloud[self.is_plate_tilted]
-            graspability = calculate_graspability_from_point_cloud(point_cloud)
-            self.graspability = torch.tensor(graspability, device=self.device)
+            point_cloud = self.get_pointcloud()  # shape: [n_points, ...] or [batch_size, n_points, ...]
+            
+            # Initialize graspability with zeros (default for non-tilted cases)
+            self.graspability = torch.zeros(len(self.is_plate_tilted), device=self.device)
+            
+            # Only compute graspability for tilted plates
+            plate_mask = self.is_plate_good.cpu().numpy()
+            if plate_mask.any():  # If any plate is tilted
+                tilted_point_clouds = point_cloud[plate_mask]  # Get only tilted point clouds
+                
+                # Process in batches of up to 8 at a time
+                batch_size = 12
+                num_tilted = len(tilted_point_clouds)
+                graspability_results = []
+                
+                for i in range(0, num_tilted, batch_size):
+                    batch = tilted_point_clouds[i:i+batch_size]
+                    graspability_batch = calculate_graspability_from_point_cloud(batch)
+                    graspability_results.append(torch.tensor(graspability_batch, device=self.device, dtype=torch.float32))
+                
+                # Combine all batch results
+                if graspability_results:
+                    graspability_tilted = torch.cat(graspability_results)
+                    self.graspability[plate_mask] = graspability_tilted
 
         reward = 0.2 * self.plate_position_penalty
         reward += 0.1 * self.ee_position_penalty  
-        reward += self.static_reward * self.is_plate_tilted
-        # reward += 0.2 * self.plate_static_reward
+        reward += 0.2 * self.static_reward * self.is_plate_good
         
-        reward += self.angle_reward * is_plate_inplace
-        # reward += self.graspability \
+        # reward += self.angle_reward * is_plate_inplace
+        self.graspability = torch.sigmoid(self.graspability / 2 - 1.0)
+        reward += self.graspability * self.is_plate_good
         
         reward[info["success"]] = 2.0
 

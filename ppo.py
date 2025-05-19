@@ -20,6 +20,7 @@ from mani_skill.utils import gym_utils
 from mani_skill.utils.wrappers.flatten import FlattenActionSpaceWrapper
 from mani_skill.utils.wrappers.record import RecordEpisode
 from mani_skill.vector.wrappers.gymnasium import ManiSkillVectorEnv
+torch.cuda.set_per_process_memory_fraction(0.7) 
 
 @dataclass
 class Args:
@@ -274,7 +275,9 @@ if __name__ == "__main__":
         print(f"Epoch: {iteration}, global_step={global_step}")
         final_values = torch.zeros((args.num_steps, args.num_envs), device=device)
         agent.eval()
-        if iteration % args.eval_freq == 1:
+        print(iteration > 1 or args.evaluate)
+        print(iteration % args.eval_freq == 1 and (iteration > 1 or args.evaluate))
+        if iteration % args.eval_freq == 1 and (iteration > 1 or args.evaluate):
             print("Evaluating")
             eval_obs, _ = eval_envs.reset()
             eval_metrics = defaultdict(list)

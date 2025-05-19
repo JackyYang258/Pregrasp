@@ -175,13 +175,13 @@ def main(args: Args):
             print(graspability)
             
             # 使用 trimesh 可视化点云
-            # pcd = trimesh.points.PointCloud(xyz_camera_np)
-            # for uid, config in env.unwrapped._sensor_configs.items():
-            #     if isinstance(config, CameraConfig):
-            #         cam2world = np.eye(4)
-            #         camera = trimesh.scene.Camera(uid, (1024, 1024), fov=(np.rad2deg(config.fov), np.rad2deg(config.fov)))
-            #         break
-            # trimesh.Scene([pcd], camera=camera, camera_transform=cam2world).show()
+            pcd = trimesh.points.PointCloud(xyz_camera_np)
+            for uid, config in env.unwrapped._sensor_configs.items():
+                if isinstance(config, CameraConfig):
+                    cam2world = np.eye(4)
+                    camera = trimesh.scene.Camera(uid, (1024, 1024), fov=(np.rad2deg(config.fov), np.rad2deg(config.fov)))
+                    break
+            trimesh.Scene([pcd], camera=camera, camera_transform=cam2world).show()
         # if args.obs_mode == "pointcloud":
         #     xyz = obs["pointcloud"]["xyzw"][0, ..., :3]
         #     colors = obs["pointcloud"]["rgb"][0]
